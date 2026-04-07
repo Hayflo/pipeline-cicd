@@ -2,46 +2,38 @@
 - name: Rollback serveur web
   hosts: webservers
   become: yes
-
   tasks:
     - name: Installer nginx si absent
       apt:
         name: nginx
         state: present
         update_cache: yes
-
     - name: Créer le dossier web si absent
       file:
         path: /var/www/html
         state: directory
         mode: '0755'
-
     - name: Remettre la page par défaut nginx
       copy:
         content: "<h1>Rollback effectué</h1>"
         dest: /var/www/html/index.html
-
     - name: S'assurer que nginx est démarré
       service:
         name: nginx
         state: started
         enabled: yes
-
 # ----------------------------------------
-
 - name: Rollback base de données
   hosts: dbservers
   become: yes
-
   tasks:
-    - name: Installer MySQL si absent
+    - name: Installer MariaDB si absent
       apt:
-        name: mysql-server
+        name: mariadb-server
         state: present
         update_cache: yes
-
-    - name: S'assurer que MySQL est démarré
+    - name: S'assurer que MariaDB est démarré
       service:
-        name: mysql
+        name: mariadb
         state: started
         enabled: yes
