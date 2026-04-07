@@ -1,7 +1,7 @@
 ---
 - name: Configurer le serveur web
   hosts: webservers
-  become: true
+  become: yes
 
   tasks:
     - name: Mettre à jour apt
@@ -42,7 +42,7 @@
 
 - name: Configurer le serveur de base de données
   hosts: debservers
-  become: true
+  become: yes
 
   vars:
     postgres_conf_path: "/etc/postgresql/15/main"
