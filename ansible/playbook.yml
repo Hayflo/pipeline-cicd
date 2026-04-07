@@ -1,0 +1,51 @@
+---
+- name: Configurer le serveur web
+  hosts: web-se
+  become: yes
+  tasks:
+
+    - name: Mettre à jour apt
+      apt:
+        update_cache: yes
+
+    - name: Installer nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Démarrer et activer nginx
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Déployer la page d'accueil
+      copy:
+        content: |
+          <html>
+          <body>
+            <h1>Déployé automatiquement</h1>
+            <p>Pipeline Jenkins + Ansible + VMware</p>
+          </body>
+          </html>
+        dest: /var/www/html/index.html
+        owner: www-data
+        group: www-data
+        mode: '0644'
+
+- name: Configurer le serveur de base de données
+  hosts: db-se
+  become: yes
+  tasks:
+
+    - name: Installer PostgreSQL
+      apt:
+        name: postgresql
+        state: present
+        update_cache: yes
+
+    - name: Démarrer et activer PostgreSQL
+      service:
+        name: postgresql
+        state: started
+        enabled: yes

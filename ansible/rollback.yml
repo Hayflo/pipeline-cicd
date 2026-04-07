@@ -1,0 +1,23 @@
+---
+- name: Rollback serveur web
+  hosts: web-se
+  become: yes
+  tasks:
+    - name: Remettre la page par défaut nginx
+      copy:
+        content: "<h1>Rollback effectué</h1>"
+        dest: /var/www/html/index.html
+
+    - name: Redémarrer nginx
+      service:
+        name: nginx
+        state: restarted
+
+- name: Rollback base de données
+  hosts: db-se
+  become: yes
+  tasks:
+    - name: S'assurer que PostgreSQL tourne
+      service:
+        name: postgresql
+        state: started
