@@ -1,6 +1,6 @@
 ---
 - name: Configurer le serveur web
-  hosts: web-se
+  hosts: webservers
   become: true
 
   tasks:
@@ -41,7 +41,7 @@
 
 
 - name: Configurer le serveur de base de données
-  hosts: deb-se
+  hosts: debservers
   become: true
 
   vars:
@@ -50,7 +50,9 @@
   tasks:
     - name: Installer PostgreSQL
       ansible.builtin.apt:
-        name: postgresql
+        name: postg
+
+resql
         state: present
         update_cache: yes
 
