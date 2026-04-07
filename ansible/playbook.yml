@@ -1,85 +1,53 @@
 ---
-- name: Configurer le serveur web
+- name: Déploiement serveur web
   hosts: webservers
   become: yes
 
   tasks:
-    - name: Mettre à jour apt
-      ansible.builtin.apt:
+    - name: Mettre à jour les paquets
+      apt:
         update_cache: yes
-        cache_valid_time: 3600
 
     - name: Installer nginx
-      ansible.builtin.apt:
+      apt:
         name: nginx
         state: present
 
-    - name: Démarrer et activer nginx
-      ansible.builtin.service:
+    - name: S'assurer que nginx est démarré
+      service:
         name: nginx
         state: started
         enabled: yes
 
-    - name: Déployer la page d'accueil
-      ansible.builtin.copy:
-        content: |
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="UTF-8">
-            <title>Déploiement automatique</title>
-          </head>
-          <body>
-            <h1>Déployé automatiquement</h1>
-            <p>Pipeline Jenkins + Ansible + VMware</p>
-          </body>
-          </html>
+    - name: Créer le dossier web si absent
+      file:
+        path: /var/www/html
+        state: directory
+        mode: '0755'
+
+    - name: Déployer une page web simple
+      copy:
         dest: /var/www/html/index.html
-        owner: www-data
-        group: www-data
-        mode: '0644'
+        content: "<h1>Déploiement réussi 🚀</h1>"
 
+# ----------------------------------------
 
-- name: Configurer le serveur de base de données
-  hosts: debservers
+- name: Déploiement base de données
+  hosts: dbservers
   become: yes
 
-  vars:
-    postgres_conf_path: "/etc/postgresql/15/main"
-
   tasks:
-    - name: Installer PostgreSQL
-      ansible.builtin.apt:
-        name: postg
-
-resql
-        state: present
+    - name: Mettre à jour les paquets
+      apt:
         update_cache: yes
 
-    - name: Démarrer et activer PostgreSQL
-      ansible.builtin.service:
-        name: postgresql
+    - name: Installer MySQL
+      apt:
+        name: mysql-server
+        state: present
+
+    - name: S'assurer que MySQL est démarré
+      service:
+        name: mysql
         state: started
         enabled: yes
-
-    - name: Autoriser les connexions distantes (postgresql.conf)
-      ansible.builtin.lineinfile:
-        path: "{{ postgres_conf_path }}/postgresql.conf"
-        regexp: '^#?listen_addresses'
-        line: "listen_addresses = '*'"
-        backup: yes
-      notify: Restart PostgreSQL
-
-    - name: Autoriser les connexions (pg_hba.conf)
-      ansible.builtin.lineinfile:
-        path: "{{ postgres_conf_path }}/pg_hba.conf"
-        line: "host all all 0.0.0.0/0 md5"
-        create: yes
-        backup: yes
-      notify: Restart PostgreSQL
-
-  handlers:
-    - name: Restart PostgreSQL
-      ansible.builtin.service:
-        name: postgresql
-        state: restarted
