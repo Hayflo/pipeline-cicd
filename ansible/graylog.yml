@@ -80,17 +80,13 @@
         state: present
         update_cache: yes
 
-    - name: Installer Docker et docker-compose (sans conflits)
+    - name: Installer Docker et docker-compose
       apt:
         name:
           - docker-ce
           - docker-ce-cli
           - containerd.io
-        state: present
-
-    - name: Installer docker-compose-plugin (version officielle)
-      apt:
-        name: docker-compose-plugin
+          - docker-compose-plugin
         state: present
 
     - name: Vérifier que Docker est actif
@@ -108,8 +104,19 @@
         state: present
 
     # =========================================
-    # 3. MONGODB VIA DOCKER
+    # 3. MONGODB VIA DOCKER (avec téléchargement forcé)
     # =========================================
+    - name: Nettoyer le cache Docker
+      command: docker system prune -a -f
+      ignore_errors: yes
+
+    - name: Télécharger l'image MongoDB explicitement (forcé)
+      docker_image:
+        name: mongo:7.0
+        source: pull
+        state: present
+        force_source: yes  # Force le téléchargement même si l'image existe
+
     - name: Lancer MongoDB en conteneur
       docker_container:
         name: mongodb
@@ -169,7 +176,7 @@
         timeout: 120
 
     # =========================================
-    # 5. INSTALLATION DE GRAYLOG (méthode manuelle)
+    # 5. INSTALLATION DE GRAYLOG
     # =========================================
     - name: Télécharger le fichier .deb du dépôt Graylog
       get_url:
