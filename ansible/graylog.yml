@@ -1,4 +1,3 @@
----
 # =============================================================
 # PLAY 1 — Installation de Graylog 5.x sur le db-server
 # Compatible Debian 12 Bookworm / 13 Trixie (sans apt-key)
@@ -36,19 +35,19 @@
         state: present
         update_cache: yes
 
-    # ── MongoDB 6 ──────────────────────────────────────────────
+    # ── MongoDB 7.0 ← MODIFIÉ ───────────────────────────────────────────────
 
-    - name: Télécharger la clé GPG MongoDB
+    - name: Télécharger la clé GPG MongoDB 7.0 ← MODIFIÉ
       get_url:
-        url: https://www.mongodb.org/static/pgp/server-6.0.asc
-        dest: /etc/apt/keyrings/mongodb-org-6.0.asc
+        url: https://www.mongodb.org/static/pgp/server-7.0.asc  # ← MODIFIÉ
+        dest: /etc/apt/keyrings/mongodb-org-7.0.asc             # ← MODIFIÉ
         mode: '0644'
 
-    - name: Ajouter le dépôt MongoDB 6
+    - name: Ajouter le dépôt MongoDB 7.0 ← MODIFIÉ
       apt_repository:
-        repo: "deb [ arch=amd64 signed-by=/etc/apt/keyrings/mongodb-org-6.0.asc ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/6.0 main"
+        repo: "deb [ arch=amd64 signed-by=/etc/apt/keyrings/mongodb-org-7.0.asc ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main"  # ← MODIFIÉ
         state: present
-        filename: mongodb-org-6.0
+        filename: mongodb-org-7.0  # ← MODIFIÉ
 
     - name: Installer MongoDB
       apt:

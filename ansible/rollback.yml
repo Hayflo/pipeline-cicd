@@ -35,24 +35,16 @@
     # ── Rollback Filebeat (web-server) ────────────────────────
 
     - name: Vérifier si Filebeat est installé (web-server)
-      command: systemctl status filebeat
-      register: filebeat_web_status
-      ignore_errors: yes
-      changed_when: false
+      stat:
+        path: /usr/bin/filebeat
+      register: filebeat_web_bin
 
-    - name: Arrêter Filebeat si en échec
-      service:
-        name: filebeat
-        state: stopped
-      when: filebeat_web_status.rc != 0
-      ignore_errors: yes
-
-    - name: Redémarrer Filebeat si présent
+    - name: Redémarrer Filebeat si présent (web-server)
       service:
         name: filebeat
         state: restarted
         enabled: yes
-      when: filebeat_web_status.rc == 0
+      when: filebeat_web_bin.stat.exists
       ignore_errors: yes
 
 # =============================================================
@@ -79,36 +71,56 @@
 
     # ── Rollback stack Graylog ────────────────────────────────
 
+    - name: Vérifier si Graylog est installé
+      stat:
+        path: /usr/share/graylog-server/bin/graylog
+      register: graylog_bin
+
+    - name: Vérifier si OpenSearch est installé
+      stat:
+        path: /usr/share/opensearch/bin/opensearch
+      register: opensearch_bin
+
+    - name: Vérifier si MongoDB est installé (paquet natif Debian)
+      stat:
+        path: /usr/bin/mongod
+      register: mongod_bin
+
     - name: Arrêter Graylog proprement
       service:
         name: graylog-server
         state: stopped
+      when: graylog_bin.stat.exists
       ignore_errors: yes
 
     - name: Arrêter OpenSearch proprement
       service:
         name: opensearch
         state: stopped
+      when: opensearch_bin.stat.exists
       ignore_errors: yes
 
     - name: Arrêter MongoDB proprement
       service:
-        name: mongod
+        name: mongodb
         state: stopped
+      when: mongod_bin.stat.exists
       ignore_errors: yes
 
     - name: Redémarrer MongoDB
       service:
-        name: mongod
+        name: mongodb
         state: started
         enabled: yes
+      when: mongod_bin.stat.exists
       ignore_errors: yes
 
-    - name: Attendre que MongoDB soit prêt
+    - name: Attendre que MongoDB soit prêt (port 27017)
       wait_for:
         port: 27017
         host: 127.0.0.1
         timeout: 30
+      when: mongod_bin.stat.exists
       ignore_errors: yes
 
     - name: Redémarrer OpenSearch
@@ -116,6 +128,7 @@
         name: opensearch
         state: started
         enabled: yes
+      when: opensearch_bin.stat.exists
       ignore_errors: yes
 
     - name: Attendre qu'OpenSearch soit prêt (port 9200)
@@ -123,6 +136,7 @@
         port: 9200
         host: 127.0.0.1
         timeout: 60
+      when: opensearch_bin.stat.exists
       ignore_errors: yes
 
     - name: Redémarrer Graylog
@@ -130,6 +144,7 @@
         name: graylog-server
         state: started
         enabled: yes
+      when: graylog_bin.stat.exists
       ignore_errors: yes
 
     - name: Attendre que Graylog soit prêt (port 9000)
@@ -137,34 +152,30 @@
         port: 9000
         host: 0.0.0.0
         timeout: 90
+      when: graylog_bin.stat.exists
       ignore_errors: yes
 
     # ── Rollback Filebeat (db-server) ─────────────────────────
 
     - name: Vérifier si Filebeat est installé (db-server)
-      command: systemctl status filebeat
-      register: filebeat_db_status
-      ignore_errors: yes
-      changed_when: false
+      stat:
+        path: /usr/bin/filebeat
+      register: filebeat_db_bin
 
-    - name: Arrêter Filebeat si en échec
-      service:
-        name: filebeat
-        state: stopped
-      when: filebeat_db_status.rc != 0
-      ignore_errors: yes
-
-    - name: Redémarrer Filebeat si présent
+    - name: Redémarrer Filebeat si présent (db-server)
       service:
         name: filebeat
         state: restarted
         enabled: yes
-      when: filebeat_db_status.rc == 0
+      when: filebeat_db_bin.stat.exists
       ignore_errors: yes
 
     - name: Résumé rollback db-server
       debug:
         msg: |
           Rollback db-server terminé.
-          Services relancés : MariaDB, MongoDB, OpenSearch, Graylog, Filebeat.
-          UI Graylog : http://192.168.56.12:9000
+          MariaDB : toujours actif.
+          Graylog installé : {{ graylog_bin.stat.exists }}
+          OpenSearch installé : {{ opensearch_bin.stat.exists }}
+          MongoDB installé : {{ mongod_bin.stat.exists }}
+          Filebeat installé : {{ filebeat_db_bin.stat.exists }}
