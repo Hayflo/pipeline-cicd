@@ -1,29 +1,31 @@
 ---
 # =============================================================
-# PLAY 1 — Installation de Graylog 5.x avec Docker (MongoDB + OpenSearch)
-# Compatible Debian 12/13 — Cible : 192.168.56.12
+# PLAY 1 — Installation de Graylog 5.x avec Docker
+# Compatible Debian 13 Trixie
+# Cible : 192.168.56.12
 # =============================================================
+
 - name: Installation Graylog 5.x (db-server)
   hosts: dbservers
   become: yes
+
   vars:
-    graylog_password_secret: "supersecretpasswordmin16chars!!"  # ⚠️ À CHANGER (min 16 caractères)
-    graylog_root_password: "admin"                              # Mot de passe UI par défaut
+    graylog_password_secret: "supersecretpasswordmin16chars!!"   # ⚠️ À CHANGER (min 16 chars)
+    graylog_root_password: "admin"                               # ⚠️ Mot de passe UI
+    mongodb_root_password: "yourmongodbpassword"                 # ⚠️ À CHANGER
     graylog_http_bind: "0.0.0.0:9000"
     opensearch_heap: "512m"
-    mongodb_root_password: "yourmongodbpassword"               # ⚠️ À CHANGER
     opensearch_version: "2.13.0"
-    java_package: "temurin-17-jdk"  # OpenJDK 17 via Adoptium
 
   tasks:
-    # =========================================
-    # 1. PRÉREQUIS SYSTÈME + DOCKER
-    # =========================================
+
+    # ── Prérequis système ──────────────────────────────────────
+
     - name: Mettre à jour la liste des paquets
       apt:
         update_cache: yes
 
-    - name: Installer les dépendances pour Adoptium et Docker
+    - name: Installer les dépendances système
       apt:
         name:
           - wget
@@ -33,13 +35,15 @@
           - lsb-release
         state: present
 
-    - name: Créer le répertoire pour les clés GPG
+    - name: Créer le répertoire /etc/apt/keyrings
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
 
-    - name: Télécharger la clé GPG d'Adoptium
+    # ── Java (Temurin 17 via Adoptium) ─────────────────────────
+
+    - name: Télécharger la clé GPG Adoptium
       get_url:
         url: https://packages.adoptium.net/artifactory/api/gpg/key/public
         dest: /etc/apt/keyrings/adoptium.asc
@@ -53,10 +57,12 @@
 
     - name: Installer OpenJDK 17 (Temurin)
       apt:
-        name: "{{ java_package }}"
+        name: temurin-17-jdk
         state: present
 
-    - name: Désinstaller les anciens paquets Docker (pour éviter les conflits)
+    # ── Docker ─────────────────────────────────────────────────
+
+    - name: Supprimer les anciens paquets Docker conflictuels
       apt:
         name:
           - docker.io
@@ -68,7 +74,7 @@
         purge: yes
         autoremove: yes
 
-    - name: Télécharger la clé GPG de Docker
+    - name: Télécharger la clé GPG Docker
       get_url:
         url: https://download.docker.com/linux/debian/gpg
         dest: /etc/apt/keyrings/docker.asc
@@ -89,33 +95,32 @@
           - docker-compose-plugin
         state: present
 
-    - name: Vérifier que Docker est actif
+    - name: Démarrer et activer Docker
       service:
         name: docker
         state: started
         enabled: yes
 
-    # =========================================
-    # 2. RÉSEAU DOCKER POUR GRAYLOG
-    # =========================================
-    - name: Créer un réseau Docker dédié à Graylog
+    # ── Nettoyage Docker (avant création du réseau) ────────────
+
+    - name: Nettoyer le cache Docker (conteneurs/images orphelins)
+      command: docker system prune -a -f
+      ignore_errors: yes
+
+    # ── Réseau Docker ──────────────────────────────────────────
+
+    - name: Créer le réseau Docker graylog_network
       docker_network:
         name: graylog_network
         state: present
 
-    # =========================================
-    # 3. MONGODB VIA DOCKER (avec téléchargement forcé)
-    # =========================================
-    - name: Nettoyer le cache Docker
-      command: docker system prune -a -f
-      ignore_errors: yes
+    # ── MongoDB via Docker ─────────────────────────────────────
 
-    - name: Télécharger l'image MongoDB explicitement (forcé)
+    - name: Télécharger l'image MongoDB 7.0
       docker_image:
         name: mongo:7.0
         source: pull
         state: present
-        force_source: yes  # Force le téléchargement même si l'image existe
 
     - name: Lancer MongoDB en conteneur
       docker_container:
@@ -123,31 +128,32 @@
         image: mongo:7.0
         networks:
           - name: graylog_network
-        ports: "27017:27017"
-        volumes: "/data/mongodb:/data/db"
+        ports:
+          - "27017:27017"
+        volumes:
+          - /data/mongodb:/data/db
         restart_policy: always
         env:
           MONGO_INITDB_ROOT_USERNAME: "admin"
           MONGO_INITDB_ROOT_PASSWORD: "{{ mongodb_root_password }}"
 
-    - name: Attendre que MongoDB soit prêt
+    - name: Attendre que MongoDB soit prêt (port 27017)
       wait_for:
         host: 127.0.0.1
         port: 27017
         timeout: 60
 
-    # =========================================
-    # 4. OPENSEARCH VIA DOCKER
-    # =========================================
+    # ── OpenSearch via Docker ──────────────────────────────────
+
+    - name: Créer le volume Docker pour OpenSearch
+      docker_volume:
+        name: opensearch_data
+        state: present
+
     - name: Télécharger l'image OpenSearch
       docker_image:
         name: "opensearchproject/opensearch:{{ opensearch_version }}"
         source: pull
-        state: present
-
-    - name: Créer un volume Docker pour OpenSearch
-      docker_volume:
-        name: opensearch_data
         state: present
 
     - name: Lancer OpenSearch en conteneur
@@ -156,8 +162,10 @@
         image: "opensearchproject/opensearch:{{ opensearch_version }}"
         networks:
           - name: graylog_network
-        ports: "9200:9200"
-        volumes: "opensearch_data:/usr/share/opensearch/data"
+        ports:
+          - "9200:9200"
+        volumes:
+          - opensearch_data:/usr/share/opensearch/data
         restart_policy: always
         env:
           OPENSEARCH_JAVA_OPTS: "-Xms{{ opensearch_heap }} -Xmx{{ opensearch_heap }}"
@@ -169,24 +177,23 @@
           - "memlock:-1:-1"
           - "nofile:65536:65536"
 
-    - name: Attendre qu'OpenSearch soit prêt
+    - name: Attendre qu'OpenSearch soit prêt (port 9200)
       wait_for:
         host: 127.0.0.1
         port: 9200
         timeout: 120
 
-    # =========================================
-    # 5. INSTALLATION DE GRAYLOG
-    # =========================================
-    - name: Télécharger le fichier .deb du dépôt Graylog
+    # ── Graylog (paquet natif) ─────────────────────────────────
+
+    - name: Télécharger le paquet .deb du dépôt Graylog 5.2
       get_url:
-        url: "https://packages.graylog2.org/repo/packages/graylog-5.2-repository_latest.deb"
-        dest: "/tmp/graylog-repo.deb"
+        url: https://packages.graylog2.org/repo/packages/graylog-5.2-repository_latest.deb
+        dest: /tmp/graylog-repo.deb
         mode: '0755'
 
-    - name: Installer le dépôt Graylog via le fichier .deb
+    - name: Installer le dépôt Graylog via le .deb
       apt:
-        deb: "/tmp/graylog-repo.deb"
+        deb: /tmp/graylog-repo.deb
         update_cache: yes
 
     - name: Installer Graylog
@@ -205,11 +212,11 @@
         regexp: "{{ item.regexp }}"
         line: "{{ item.line }}"
       loop:
-        - { regexp: '^password_secret', line: 'password_secret = {{ graylog_password_secret }}' }
+        - { regexp: '^password_secret',    line: 'password_secret = {{ graylog_password_secret }}' }
         - { regexp: '^root_password_sha2', line: 'root_password_sha2 = {{ graylog_root_password_sha2.stdout }}' }
-        - { regexp: '^http_bind_address', line: 'http_bind_address = {{ graylog_http_bind }}' }
+        - { regexp: '^http_bind_address',  line: 'http_bind_address = {{ graylog_http_bind }}' }
         - { regexp: '^elasticsearch_hosts', line: 'elasticsearch_hosts = http://127.0.0.1:9200' }
-        - { regexp: '^mongodb_uri', line: 'mongodb_uri = mongodb://admin:{{ mongodb_root_password }}@127.0.0.1:27017/graylog?authSource=admin' }
+        - { regexp: '^mongodb_uri',        line: 'mongodb_uri = mongodb://admin:{{ mongodb_root_password }}@127.0.0.1:27017/graylog?authSource=admin' }
 
     - name: Démarrer et activer Graylog
       service:
@@ -217,35 +224,38 @@
         state: started
         enabled: yes
 
-    - name: Attendre que Graylog soit prêt
+    - name: Attendre que Graylog soit prêt (port 9000)
       wait_for:
         host: 0.0.0.0
         port: 9000
         timeout: 90
 
-    - name: Ouvrir les ports firewall pour Graylog
+    - name: Ouvrir les ports firewall
       ufw:
         rule: allow
         port: "{{ item }}"
         proto: tcp
       loop:
-        - "5044"  # Port pour les inputs Beats
-        - "9000"  # Port de l'UI Graylog
+        - "5044"
+        - "9000"
       ignore_errors: yes
 
 # =============================================================
-# PLAY 2 — Installation de Filebeat sur le web-server (Nginx)
+# PLAY 2 — Filebeat sur le web-server (Nginx)
 # Cible : 192.168.56.11
 # =============================================================
+
 - name: Installation Filebeat sur le web-server (Nginx)
   hosts: webservers
   become: yes
+
   vars:
     graylog_host: "192.168.56.12"
     graylog_beats_port: 5044
 
   tasks:
-    - name: Installer les dépendances pour Filebeat
+
+    - name: Installer les dépendances Filebeat
       apt:
         name:
           - apt-transport-https
@@ -253,31 +263,31 @@
           - curl
         state: present
 
-    - name: Créer le répertoire pour les clés GPG
+    - name: Créer le répertoire /etc/apt/keyrings (web-server)
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
 
-    - name: Télécharger la clé GPG Elastic
+    - name: Télécharger la clé GPG Elastic (web-server)
       get_url:
         url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
         dest: /etc/apt/keyrings/elastic.asc
         mode: '0644'
 
-    - name: Ajouter le dépôt Filebeat
+    - name: Ajouter le dépôt Filebeat (web-server)
       apt_repository:
         repo: "deb [signed-by=/etc/apt/keyrings/elastic.asc] https://artifacts.elastic.co/packages/8.x/apt stable main"
         state: present
         filename: elastic-8
         update_cache: yes
 
-    - name: Installer Filebeat
+    - name: Installer Filebeat (web-server)
       apt:
         name: filebeat
         state: present
 
-    - name: Configurer Filebeat pour envoyer les logs Nginx à Graylog
+    - name: Configurer Filebeat → Nginx vers Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
         content: |
@@ -291,29 +301,34 @@
                 service: nginx
                 server: web-server
               fields_under_root: true
+
           output.logstash:
             hosts: ["{{ graylog_host }}:{{ graylog_beats_port }}"]
+
           logging.level: warning
 
-    - name: Démarrer et activer Filebeat
+    - name: Démarrer et activer Filebeat (web-server)
       service:
         name: filebeat
         state: started
         enabled: yes
 
 # =============================================================
-# PLAY 3 — Installation de Filebeat sur le db-server (MariaDB)
+# PLAY 3 — Filebeat sur le db-server (MariaDB)
 # Cible : 192.168.56.12
 # =============================================================
+
 - name: Installation Filebeat sur le db-server (MariaDB)
   hosts: dbservers
   become: yes
+
   vars:
     graylog_host: "127.0.0.1"
     graylog_beats_port: 5044
 
   tasks:
-    - name: Installer Filebeat
+
+    - name: Installer Filebeat (db-server)
       apt:
         name: filebeat
         state: present
@@ -335,7 +350,7 @@
         group: adm
         mode: '0750'
 
-    - name: Configurer Filebeat pour envoyer les logs MariaDB à Graylog
+    - name: Configurer Filebeat → MariaDB vers Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
         content: |
@@ -349,11 +364,13 @@
                 service: mariadb
                 server: db-server
               fields_under_root: true
+
           output.logstash:
             hosts: ["{{ graylog_host }}:{{ graylog_beats_port }}"]
+
           logging.level: warning
 
-    - name: Démarrer et activer Filebeat
+    - name: Démarrer et activer Filebeat (db-server)
       service:
         name: filebeat
         state: started
