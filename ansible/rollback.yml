@@ -20,21 +20,3 @@
         name: nginx
         state: started
         enabled: yes
-
-# =============================================================
-# PLAY 2 — Rollback base de données
-# =============================================================
-- name: Rollback base de données
-  hosts: dbservers
-  become: yes
-  tasks:
-    - name: Installer MariaDB
-      apt:
-        name: mariadb-server
-        state: present
-
-    - name: Démarrer MariaDB
-      service:
-        name: mariadb
-        state: started
-        enabled: yes
