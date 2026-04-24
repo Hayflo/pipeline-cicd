@@ -13,8 +13,8 @@
     opensearch_heap: "512m"
     mongodb_root_password: "yourmongodbpassword"               # ⚠️ À CHANGER
     opensearch_version: "2.13.0"
-    # Utilisation de OpenJDK 11 (disponible par défaut sur Debian 12/13)
-    java_package: "openjdk-11-jre-headless"
+    # Utilisation de OpenJDK 17 via le dépôt Adoptium (compatible Debian 12/13)
+    java_package: "temurin-17-jdk"
 
   tasks:
     # =========================================
@@ -24,22 +24,37 @@
       apt:
         update_cache: yes
 
-    - name: Installer les dépendances système
+    - name: Installer les dépendances pour Adoptium (Java 17)
       apt:
         name:
+          - wget
           - apt-transport-https
           - gnupg
-          - curl
-          - pwgen
-          - "{{ java_package }}"  # Java 11 au lieu de 17
-          - ca-certificates
         state: present
 
-    - name: Ajouter le dépôt Docker officiel
+    - name: Ajouter la clé GPG d'Adoptium
+      apt_key:
+        url: https://packages.adoptium.net/artifactory/api/gpg/key/public
+        state: present
+
+    - name: Ajouter le dépôt Adoptium
+      apt_repository:
+        repo: "deb https://packages.adoptium.net/artifactory/deb {{ ansible_distribution_release }} main"
+        state: present
+        update_cache: yes
+
+    - name: Installer OpenJDK 17 (Temurin)
+      apt:
+        name: "{{ java_package }}"
+        state: present
+
+    - name: Installer Docker et dépendances
       block:
         - name: Installer les dépendances pour Docker
           apt:
             name:
+              - ca-certificates
+              - curl
               - gnupg
               - lsb-release
             state: present
@@ -55,14 +70,14 @@
             state: present
             update_cache: yes
 
-    - name: Installer Docker et docker-compose
-      apt:
-        name:
-          - docker-ce
-          - docker-ce-cli
-          - containerd.io
-          - docker-compose-plugin
-        state: present
+        - name: Installer Docker et docker-compose
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-compose-plugin
+            state: present
 
     - name: Vérifier que Docker est actif
       service:
