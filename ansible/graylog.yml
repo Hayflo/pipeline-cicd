@@ -13,24 +13,62 @@
     opensearch_heap: "512m"
     mongodb_root_password: "yourmongodbpassword"               # ⚠️ À CHANGER
     opensearch_version: "2.13.0"
+    # Utilisation de OpenJDK 11 (disponible par défaut sur Debian 12/13)
+    java_package: "openjdk-11-jre-headless"
 
   tasks:
     # =========================================
     # 1. PRÉREQUIS SYSTÈME + DOCKER
     # =========================================
-    - name: Installer les dépendances système + Docker
+    - name: Mettre à jour la liste des paquets
+      apt:
+        update_cache: yes
+
+    - name: Installer les dépendances système
       apt:
         name:
           - apt-transport-https
           - gnupg
           - curl
           - pwgen
-          - openjdk-17-jre-headless  # Java 17 pour Graylog
-          - docker.io
-          - docker-compose
-          - python3-docker
+          - "{{ java_package }}"  # Java 11 au lieu de 17
+          - ca-certificates
         state: present
-        update_cache: yes
+
+    - name: Ajouter le dépôt Docker officiel
+      block:
+        - name: Installer les dépendances pour Docker
+          apt:
+            name:
+              - gnupg
+              - lsb-release
+            state: present
+
+        - name: Ajouter la clé GPG de Docker
+          apt_key:
+            url: https://download.docker.com/linux/debian/gpg
+            state: present
+
+        - name: Ajouter le dépôt Docker
+          apt_repository:
+            repo: "deb [arch=amd64] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+            state: present
+            update_cache: yes
+
+    - name: Installer Docker et docker-compose
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+
+    - name: Vérifier que Docker est actif
+      service:
+        name: docker
+        state: started
+        enabled: yes
 
     # =========================================
     # 2. RÉSEAU DOCKER POUR GRAYLOG
