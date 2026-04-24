@@ -7,7 +7,7 @@
   hosts: dbservers
   become: yes
   vars:
-    graylog_password_secret: "supersecret"  # ⚠️ À CHANGER (min 16 caractères)
+    graylog_password_secret: "supersecretpasswordmin16chars!!"  # ⚠️ À CHANGER (min 16 caractères)
     graylog_root_password: "admin"                              # Mot de passe UI par défaut
     graylog_http_bind: "0.0.0.0:9000"
     opensearch_heap: "512m"
@@ -25,7 +25,7 @@
           - gnupg
           - curl
           - pwgen
-          - default-jre-headless
+          - openjdk-17-jre-headless  # Java 17 pour Graylog
           - docker.io
           - docker-compose
           - python3-docker
@@ -102,21 +102,23 @@
         timeout: 120
 
     # =========================================
-    # 5. INSTALLATION DE GRAYLOG (NATIF)
+    # 5. INSTALLATION DE GRAYLOG (méthode manuelle)
     # =========================================
-    - name: Ajouter le dépôt Graylog (sans vérification GPG)
-      apt_repository:
-        repo: "deb [trusted=yes] https://downloads.graylog.org/repo/packages/debian stable 5.2"
-        state: present
-        filename: graylog
+    - name: Télécharger le fichier .deb du dépôt Graylog
+      get_url:
+        url: "https://packages.graylog2.org/repo/packages/graylog-5.2-repository_latest.deb"
+        dest: "/tmp/graylog-repo.deb"
+        mode: '0755'
+
+    - name: Installer le dépôt Graylog via le fichier .deb
+      apt:
+        deb: "/tmp/graylog-repo.deb"
         update_cache: yes
 
     - name: Installer Graylog
       apt:
         name: graylog-server
         state: present
-        allow_unauthenticated: yes
-      ignore_errors: yes
 
     - name: Générer le hash SHA2 du mot de passe root
       command: "echo -n {{ graylog_root_password }} | sha256sum | awk '{print $1}'"
