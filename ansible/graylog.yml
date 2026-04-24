@@ -26,7 +26,7 @@
           - gnupg
           - curl
           - pwgen
-          - openjdk-17-jre-headless
+          - default-jre-headless
         state: present
         update_cache: yes
 
