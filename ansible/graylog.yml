@@ -56,7 +56,19 @@
         name: "{{ java_package }}"
         state: present
 
-    - name: Ajouter la clé GPG de Docker
+    - name: Désinstaller les anciens paquets Docker (pour éviter les conflits)
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+          - docker-buildx
+          - containerd
+          - runc
+        state: absent
+        purge: yes
+        autoremove: yes
+
+    - name: Télécharger la clé GPG de Docker
       get_url:
         url: https://download.docker.com/linux/debian/gpg
         dest: /etc/apt/keyrings/docker.asc
@@ -68,13 +80,17 @@
         state: present
         update_cache: yes
 
-    - name: Installer Docker et docker-compose
+    - name: Installer Docker et docker-compose (sans conflits)
       apt:
         name:
           - docker-ce
           - docker-ce-cli
           - containerd.io
-          - docker-compose-plugin
+        state: present
+
+    - name: Installer docker-compose-plugin (version officielle)
+      apt:
+        name: docker-compose-plugin
         state: present
 
     - name: Vérifier que Docker est actif
