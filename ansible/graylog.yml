@@ -2,6 +2,8 @@
 # =============================================================
 # PLAY 1 — Installation de Graylog 5.x avec Docker
 # Compatible Debian 13 Trixie
+# MongoDB + OpenSearch : conteneurs Docker
+# Graylog : .deb direct (sans dépôt APT — clé SHA1 incompatible)
 # Cible : 192.168.56.12
 # =============================================================
 
@@ -19,6 +21,17 @@
 
   tasks:
 
+    # ── Nettoyage préventif du dépôt Graylog (clé SHA1 incompatible) ──
+
+    - name: Supprimer le dépôt Graylog APT si présent
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/graylog.list
+        - /etc/apt/sources.list.d/graylog-5.2.list
+        - /tmp/graylog-repo.deb
+
     # ── Prérequis système ──────────────────────────────────────
 
     - name: Mettre à jour la liste des paquets
@@ -33,6 +46,8 @@
           - gnupg
           - ca-certificates
           - lsb-release
+          - uuid-runtime
+          - adduser
         state: present
 
     - name: Créer le répertoire /etc/apt/keyrings
@@ -183,55 +198,43 @@
         port: 9200
         timeout: 120
 
-    # ── Graylog (paquet natif) ─────────────────────────────────
-
-    - name: Télécharger le paquet .deb du dépôt Graylog 5.2
-      get_url:
-        url: https://packages.graylog2.org/repo/packages/graylog-5.2-repository_latest.deb
-        dest: /tmp/graylog-repo.deb
-        mode: '0755'
-
-    - name: Installer le dépôt Graylog via le .deb
-      apt:
-        deb: /tmp/graylog-repo.deb
-
-    - name: Rafraîchir le cache APT après ajout du dépôt Graylog
-      apt:
-        update_cache: yes
-
-    - name: Installer Graylog
-      apt:
-        name: graylog-server
-        state: present
+    # ── Graylog via Docker ────────────────────────────────────────
+    # Le dépôt APT Graylog utilise une clé SHA1 rejetée par Debian 13.
+    # Solution : lancer Graylog lui-même en conteneur Docker.
 
     - name: Générer le hash SHA2 du mot de passe root
       command: "echo -n {{ graylog_root_password }} | sha256sum | awk '{print $1}'"
       register: graylog_root_password_sha2
       changed_when: false
 
-    - name: Configurer Graylog (server.conf)
-      lineinfile:
-        path: /etc/graylog/server/server.conf
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-      loop:
-        - { regexp: '^password_secret',    line: 'password_secret = {{ graylog_password_secret }}' }
-        - { regexp: '^root_password_sha2', line: 'root_password_sha2 = {{ graylog_root_password_sha2.stdout }}' }
-        - { regexp: '^http_bind_address',  line: 'http_bind_address = {{ graylog_http_bind }}' }
-        - { regexp: '^elasticsearch_hosts', line: 'elasticsearch_hosts = http://127.0.0.1:9200' }
-        - { regexp: '^mongodb_uri',        line: 'mongodb_uri = mongodb://admin:{{ mongodb_root_password }}@127.0.0.1:27017/graylog?authSource=admin' }
-
-    - name: Démarrer et activer Graylog
-      service:
-        name: graylog-server
-        state: started
-        enabled: yes
+    - name: Lancer Graylog en conteneur
+      docker_container:
+        name: graylog
+        image: graylog/graylog:5.2
+        networks:
+          - name: graylog_network
+        ports:
+          - "9000:9000"
+          - "5044:5044"
+          - "5044:5044/udp"
+          - "12201:12201"
+          - "12201:12201/udp"
+        volumes:
+          - /data/graylog:/usr/share/graylog/data
+        restart_policy: always
+        env:
+          GRAYLOG_PASSWORD_SECRET: "{{ graylog_password_secret }}"
+          GRAYLOG_ROOT_PASSWORD_SHA2: "{{ graylog_root_password_sha2.stdout }}"
+          GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
+          GRAYLOG_HTTP_EXTERNAL_URI: "http://192.168.56.12:9000/"
+          GRAYLOG_ELASTICSEARCH_HOSTS: "http://opensearch:9200"
+          GRAYLOG_MONGODB_URI: "mongodb://admin:{{ mongodb_root_password }}@mongodb:27017/graylog?authSource=admin"
 
     - name: Attendre que Graylog soit prêt (port 9000)
       wait_for:
-        host: 0.0.0.0
+        host: 127.0.0.1
         port: 9000
-        timeout: 90
+        timeout: 120
 
     - name: Ouvrir les ports firewall
       ufw:
@@ -290,7 +293,7 @@
         name: filebeat
         state: present
 
-    - name: Configurer Filebeat → Nginx vers Graylog
+    - name: Configurer Filebeat pour Nginx vers Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
         content: |
@@ -353,7 +356,7 @@
         group: adm
         mode: '0750'
 
-    - name: Configurer Filebeat → MariaDB vers Graylog
+    - name: Configurer Filebeat pour MariaDB vers Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
         content: |
