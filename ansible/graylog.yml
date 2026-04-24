@@ -13,8 +13,7 @@
     opensearch_heap: "512m"
     mongodb_root_password: "yourmongodbpassword"               # ⚠️ À CHANGER
     opensearch_version: "2.13.0"
-    # Utilisation de OpenJDK 17 via le dépôt Adoptium (compatible Debian 12/13)
-    java_package: "temurin-17-jdk"
+    java_package: "temurin-17-jdk"  # OpenJDK 17 via Adoptium
 
   tasks:
     # =========================================
@@ -24,22 +23,31 @@
       apt:
         update_cache: yes
 
-    - name: Installer les dépendances pour Adoptium (Java 17)
+    - name: Installer les dépendances pour Adoptium et Docker
       apt:
         name:
           - wget
-          - apt-transport-https
+          - curl
           - gnupg
+          - ca-certificates
+          - lsb-release
         state: present
 
-    - name: Ajouter la clé GPG d'Adoptium
-      apt_key:
+    - name: Créer le répertoire pour les clés GPG
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Télécharger la clé GPG d'Adoptium
+      get_url:
         url: https://packages.adoptium.net/artifactory/api/gpg/key/public
-        state: present
+        dest: /etc/apt/keyrings/adoptium.asc
+        mode: '0644'
 
     - name: Ajouter le dépôt Adoptium
       apt_repository:
-        repo: "deb https://packages.adoptium.net/artifactory/deb {{ ansible_distribution_release }} main"
+        repo: "deb [signed-by=/etc/apt/keyrings/adoptium.asc] https://packages.adoptium.net/artifactory/deb {{ ansible_distribution_release }} main"
         state: present
         update_cache: yes
 
@@ -48,36 +56,26 @@
         name: "{{ java_package }}"
         state: present
 
-    - name: Installer Docker et dépendances
-      block:
-        - name: Installer les dépendances pour Docker
-          apt:
-            name:
-              - ca-certificates
-              - curl
-              - gnupg
-              - lsb-release
-            state: present
+    - name: Ajouter la clé GPG de Docker
+      get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0644'
 
-        - name: Ajouter la clé GPG de Docker
-          apt_key:
-            url: https://download.docker.com/linux/debian/gpg
-            state: present
+    - name: Ajouter le dépôt Docker
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+        state: present
+        update_cache: yes
 
-        - name: Ajouter le dépôt Docker
-          apt_repository:
-            repo: "deb [arch=amd64] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
-            state: present
-            update_cache: yes
-
-        - name: Installer Docker et docker-compose
-          apt:
-            name:
-              - docker-ce
-              - docker-ce-cli
-              - containerd.io
-              - docker-compose-plugin
-            state: present
+    - name: Installer Docker et docker-compose
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
 
     - name: Vérifier que Docker est actif
       service:
@@ -232,6 +230,12 @@
           - curl
         state: present
 
+    - name: Créer le répertoire pour les clés GPG
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
     - name: Télécharger la clé GPG Elastic
       get_url:
         url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
@@ -240,15 +244,15 @@
 
     - name: Ajouter le dépôt Filebeat
       apt_repository:
-        repo: "deb [ signed-by=/etc/apt/keyrings/elastic.asc ] https://artifacts.elastic.co/packages/8.x/apt stable main"
+        repo: "deb [signed-by=/etc/apt/keyrings/elastic.asc] https://artifacts.elastic.co/packages/8.x/apt stable main"
         state: present
         filename: elastic-8
+        update_cache: yes
 
     - name: Installer Filebeat
       apt:
         name: filebeat
         state: present
-        update_cache: yes
 
     - name: Configurer Filebeat pour envoyer les logs Nginx à Graylog
       copy:
@@ -290,7 +294,6 @@
       apt:
         name: filebeat
         state: present
-        update_cache: yes
 
     - name: Activer les logs généraux MariaDB
       blockinfile:
