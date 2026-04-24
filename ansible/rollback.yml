@@ -1,4 +1,3 @@
----
 # =============================================================
 # PLAY 1 — Rollback serveur web
 # Cible : 192.168.56.11
@@ -8,7 +7,6 @@
   hosts: webservers
   become: yes
   tasks:
-
     - name: Installer nginx si absent
       apt:
         name: nginx
@@ -33,7 +31,6 @@
         enabled: yes
 
     # ── Rollback Filebeat (web-server) ────────────────────────
-
     - name: Vérifier si Filebeat est installé (web-server)
       stat:
         path: /usr/bin/filebeat
@@ -56,7 +53,6 @@
   hosts: dbservers
   become: yes
   tasks:
-
     - name: Installer MariaDB si absent
       apt:
         name: mariadb-server
@@ -69,8 +65,27 @@
         state: started
         enabled: yes
 
-    # ── Rollback stack Graylog ────────────────────────────────
+    # ── Rollback MongoDB (Docker) ─────────────────────────────
+    - name: Vérifier si le conteneur MongoDB existe
+      command: docker inspect mongodb
+      register: mongodb_container
+      ignore_errors: yes
+      changed_when: false
 
+    - name: Arrêter et supprimer le conteneur MongoDB
+      docker_container:
+        name: mongodb
+        state: absent
+      when: mongodb_container.rc == 0
+      ignore_errors: yes
+
+    - name: Supprimer le réseau Docker Graylog
+      docker_network:
+        name: graylog_network
+        state: absent
+      ignore_errors: yes
+
+    # ── Rollback stack Graylog ────────────────────────────────
     - name: Vérifier si Graylog est installé
       stat:
         path: /usr/share/graylog-server/bin/graylog
@@ -100,16 +115,16 @@
       when: opensearch_bin.stat.exists
       ignore_errors: yes
 
-    - name: Arrêter MongoDB proprement
+    - name: Arrêter MongoDB proprement (si installé en natif)
       service:
-        name: mongodb
+        name: mongod
         state: stopped
       when: mongod_bin.stat.exists
       ignore_errors: yes
 
-    - name: Redémarrer MongoDB
+    - name: Redémarrer MongoDB (si installé en natif)
       service:
-        name: mongodb
+        name: mongod
         state: started
         enabled: yes
       when: mongod_bin.stat.exists
@@ -156,7 +171,6 @@
       ignore_errors: yes
 
     # ── Rollback Filebeat (db-server) ─────────────────────────
-
     - name: Vérifier si Filebeat est installé (db-server)
       stat:
         path: /usr/bin/filebeat
@@ -177,5 +191,6 @@
           MariaDB : toujours actif.
           Graylog installé : {{ graylog_bin.stat.exists }}
           OpenSearch installé : {{ opensearch_bin.stat.exists }}
-          MongoDB installé : {{ mongod_bin.stat.exists }}
+          MongoDB natif installé : {{ mongod_bin.stat.exists }}
+          Conteneur MongoDB supprimé : {{ mongodb_container.rc == 0 }}
           Filebeat installé : {{ filebeat_db_bin.stat.exists }}

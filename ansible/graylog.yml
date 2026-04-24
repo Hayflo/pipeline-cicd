@@ -1,6 +1,6 @@
 # =============================================================
 # PLAY 1 — Installation de Graylog 5.x sur le db-server
-# Compatible Debian 12 Bookworm / 13 Trixie (sans apt-key)
+# Compatible Debian 12 Bookworm / 13 Trixie
 # Cible : 192.168.56.12
 # =============================================================
 
@@ -9,22 +9,22 @@
   become: yes
 
   vars:
-    graylog_password_secret: "supersecretpasswordmin16chars!!"   # min 16 chars — à changer
-    graylog_root_password: "admin"                               # mot de passe UI — à changer
+    graylog_password_secret: "supersecretpasswordmin16chars!!"  # min 16 chars — à changer
+    graylog_root_password: "admin"                              # mot de passe UI — à changer
     graylog_http_bind: "0.0.0.0:9000"
     opensearch_heap: "512m"
+    mongodb_root_password: "yourmongodbpassword"               # ← NOUVEAU : Mot de passe pour MongoDB
 
   tasks:
 
-    # ── Prérequis système ──────────────────────────────────────
-
+    # ── Prérequis système ─────────────────────────────────────────────────────
     - name: Créer le dossier /etc/apt/keyrings
       file:
         path: /etc/apt/keyrings
         state: directory
         mode: '0755'
 
-    - name: Installer les dépendances système
+    - name: Installer les dépendances système + Docker ← MODIFIÉ
       apt:
         name:
           - apt-transport-https
@@ -32,37 +32,38 @@
           - curl
           - pwgen
           - default-jre-headless
+          - docker.io                                      # ← NOUVEAU
+          - docker-compose                                 # ← NOUVEAU
+          - python3-docker                                 # ← NOUVEAU (pour le module Ansible)
         state: present
         update_cache: yes
 
-    # ── MongoDB 7.0 ← MODIFIÉ ───────────────────────────────────────────────
-
-    - name: Télécharger la clé GPG MongoDB 7.0 ← MODIFIÉ
-      get_url:
-        url: https://www.mongodb.org/static/pgp/server-7.0.asc  # ← MODIFIÉ
-        dest: /etc/apt/keyrings/mongodb-org-7.0.asc             # ← MODIFIÉ
-        mode: '0644'
-
-    - name: Ajouter le dépôt MongoDB 7.0 ← MODIFIÉ
-      apt_repository:
-        repo: "deb [ arch=amd64 signed-by=/etc/apt/keyrings/mongodb-org-7.0.asc ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main"  # ← MODIFIÉ
+    # ── MongoDB via Docker ← NOUVEAU ───────────────────────────────────────────
+    - name: Créer un réseau Docker pour Graylog ← NOUVEAU
+      docker_network:
+        name: graylog_network
         state: present
-        filename: mongodb-org-7.0  # ← MODIFIÉ
 
-    - name: Installer MongoDB
-      apt:
-        name: mongodb-org
-        state: present
-        update_cache: yes
+    - name: Lancer MongoDB en conteneur ← NOUVEAU
+      docker_container:
+        name: mongodb
+        image: mongo:7.0
+        networks:
+          - name: graylog_network
+        ports: "27017:27017"
+        volumes: "/data/mongodb:/data/db"
+        restart_policy: always
+        env:
+          MONGO_INITDB_ROOT_USERNAME: "admin"
+          MONGO_INITDB_ROOT_PASSWORD: "{{ mongodb_root_password }}"
 
-    - name: Démarrer et activer MongoDB
-      service:
-        name: mongod
-        state: started
-        enabled: yes
+    - name: Attendre que MongoDB soit prêt ← NOUVEAU
+      wait_for:
+        host: 127.0.0.1
+        port: 27017
+        timeout: 60
 
-    # ── OpenSearch 2 ───────────────────────────────────────────
-
+    # ── OpenSearch 2 ───────────────────────────────────────────────────────────
     - name: Télécharger la clé GPG OpenSearch
       get_url:
         url: https://artifacts.opensearch.org/publickeys/opensearch.pgp
@@ -115,8 +116,7 @@
         port: 9200
         timeout: 60
 
-    # ── Graylog 5 ──────────────────────────────────────────────
-
+    # ── Graylog 5 ────────────────────────────────────────────────────────────
     - name: Télécharger la clé GPG Graylog
       get_url:
         url: https://downloads.graylog.org/repo/packages/debian/pubkey.gpg
@@ -140,7 +140,7 @@
       register: graylog_root_password_sha2
       changed_when: false
 
-    - name: Configurer Graylog (server.conf)
+    - name: Configurer Graylog (server.conf) pour Docker MongoDB ← MODIFIÉ
       lineinfile:
         path: /etc/graylog/server/server.conf
         regexp: "{{ item.regexp }}"
@@ -150,6 +150,7 @@
         - { regexp: '^root_password_sha2', line: 'root_password_sha2 = {{ graylog_root_password_sha2.stdout }}' }
         - { regexp: '^http_bind_address', line: 'http_bind_address = {{ graylog_http_bind }}' }
         - { regexp: '^elasticsearch_hosts', line: 'elasticsearch_hosts = http://127.0.0.1:9200' }
+        - { regexp: '^mongodb_uri', line: 'mongodb_uri = mongodb://admin:{{ mongodb_root_password }}@127.0.0.1:27017/graylog?authSource=admin' }  # ← MODIFIÉ
 
     - name: Démarrer et activer Graylog
       service:
