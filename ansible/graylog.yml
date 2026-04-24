@@ -3,7 +3,7 @@
 # PLAY 1 — Installation de Graylog 5.x avec Docker
 # Compatible Debian 13 Trixie
 # MongoDB + OpenSearch : conteneurs Docker
-# Graylog : .deb direct (sans dépôt APT — clé SHA1 incompatible)
+# Graylog : conteneur Docker
 # Cible : 192.168.56.12
 # =============================================================
 
@@ -198,12 +198,12 @@
         port: 9200
         timeout: 120
 
-    # ── Graylog via Docker ────────────────────────────────────────
-    # Le dépôt APT Graylog utilise une clé SHA1 rejetée par Debian 13.
-    # Solution : lancer Graylog lui-même en conteneur Docker.
+    # ── Graylog via Docker ─────────────────────────────────────
+    # CORRECTION : utiliser shell (et non command) pour que les pipes
+    # soient interprétés et que le hash SHA2 soit correctement généré.
 
     - name: Générer le hash SHA2 du mot de passe root
-      command: "echo -n {{ graylog_root_password }} | sha256sum | awk '{print $1}'"
+      shell: "echo -n {{ graylog_root_password }} | sha256sum | awk '{print $1}'"
       register: graylog_root_password_sha2
       changed_when: false
 
@@ -236,6 +236,17 @@
         port: 9000
         timeout: 120
 
+    # ── Firewall ───────────────────────────────────────────────
+    # CORRECTION : installer ufw explicitement (absent par défaut sur Debian 13)
+
+    - name: Installer ufw
+      apt:
+        name: ufw
+        state: present
+
+    - name: Activer ufw
+      command: ufw --force enable
+
     - name: Ouvrir les ports firewall
       ufw:
         rule: allow
@@ -244,7 +255,6 @@
       loop:
         - "5044"
         - "9000"
-      ignore_errors: yes
 
 # =============================================================
 # PLAY 2 — Filebeat sur le web-server (Nginx)
@@ -296,6 +306,7 @@
     - name: Configurer Filebeat pour Nginx vers Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
+        mode: '0600'
         content: |
           filebeat.inputs:
             - type: log
@@ -322,6 +333,7 @@
 # =============================================================
 # PLAY 3 — Filebeat sur le db-server (MariaDB)
 # Cible : 192.168.56.12
+# CORRECTION : ajout des étapes dépôt Elastic manquantes
 # =============================================================
 
 - name: Installation Filebeat sur le db-server (MariaDB)
@@ -333,6 +345,36 @@
     graylog_beats_port: 5044
 
   tasks:
+
+    # CORRECTION : ces étapes étaient absentes du Play 3 original,
+    # ce qui causait l'erreur "No package matching 'filebeat' is available"
+
+    - name: Installer les dépendances Filebeat (db-server)
+      apt:
+        name:
+          - apt-transport-https
+          - gnupg
+          - curl
+        state: present
+
+    - name: Créer le répertoire /etc/apt/keyrings (db-server)
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Télécharger la clé GPG Elastic (db-server)
+      get_url:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        dest: /etc/apt/keyrings/elastic.asc
+        mode: '0644'
+
+    - name: Ajouter le dépôt Filebeat (db-server)
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/elastic.asc] https://artifacts.elastic.co/packages/8.x/apt stable main"
+        state: present
+        filename: elastic-8
+        update_cache: yes
 
     - name: Installer Filebeat (db-server)
       apt:
@@ -359,6 +401,7 @@
     - name: Configurer Filebeat pour MariaDB vers Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
+        mode: '0600'
         content: |
           filebeat.inputs:
             - type: log
