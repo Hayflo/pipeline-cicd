@@ -8,7 +8,6 @@ pipeline {
         INVENTORY  = 'ansible/hosts'
         PLAYBOOK   = 'ansible/playbook.yml'
         ROLLBACK   = 'ansible/rollback.yml'
-        GRAYLOG    = 'ansible/graylog.yml'
     }
  
     stages {
@@ -25,7 +24,6 @@ pipeline {
             steps {
                 sh 'ansible --version'
                 sh 'ansible-playbook --syntax-check -i $INVENTORY $PLAYBOOK'
-                sh 'ansible-playbook --syntax-check -i $INVENTORY $GRAYLOG'
             }
         }
  
@@ -46,31 +44,12 @@ pipeline {
             }
         }
  
-        stage('Déploiement Graylog') {
-            steps {
-                echo 'Installation de Graylog + Filebeat sur les VMs...'
-                sh '''
-                ansible-playbook \
-                  -i $INVENTORY \
-                  $GRAYLOG \
-                  -v
-                '''
-            }
-        }
- 
         stage('Vérification déploiement') {
             steps {
                 sh '''
                 curl -f http://$WEB_SERVER || exit 1
                 '''
                 echo 'Serveur web répond correctement'
- 
-                sh '''
-                curl -f http://$DB_SERVER:9000/api/ \
-                  -u admin:admin \
-                  -H "X-Requested-By: jenkins" || echo "Graylog UI non joignable — vérifier manuellement"
-                '''
-                echo 'Vérification Graylog terminée'
             }
         }
     }
@@ -78,7 +57,6 @@ pipeline {
     post {
         success {
             echo "Déploiement réussi sur ${env.GIT_BRANCH}"
-            echo "Graylog accessible sur http://${env.DB_SERVER}:9000"
         }
  
         failure {
