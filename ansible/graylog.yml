@@ -7,19 +7,12 @@
   hosts: dbservers
   become: yes
   vars:
-    # --- Mot de passe Graylog ---
-    graylog_password_secret: "supersecretpasswordmin16chars!!"  # ⚠️ À CHANGER (min 16 caractères)
-    graylog_root_password: "admin"                              # Mot de passe UI par défaut (à changer après la 1ère connexion)
-
-    # --- Configuration Graylog ---
-    graylog_http_bind: "0.0.0.0:9000"                          # Adresse de liaison
-    opensearch_heap: "512m"                                   # Mémoire allouée à OpenSearch
-
-    # --- Mot de passe MongoDB ---
+    graylog_password_secret: "supersecret"  # ⚠️ À CHANGER (min 16 caractères)
+    graylog_root_password: "admin"                              # Mot de passe UI par défaut
+    graylog_http_bind: "0.0.0.0:9000"
+    opensearch_heap: "512m"
     mongodb_root_password: "yourmongodbpassword"               # ⚠️ À CHANGER
-
-    # --- Version OpenSearch ---
-    opensearch_version: "2.13.0"                               # Version compatible avec Graylog 5.x
+    opensearch_version: "2.13.0"
 
   tasks:
     # =========================================
@@ -32,10 +25,10 @@
           - gnupg
           - curl
           - pwgen
-          - default-jre-headless  # Java pour Graylog
-          - docker.io             # Docker pour MongoDB/OpenSearch
+          - default-jre-headless
+          - docker.io
           - docker-compose
-          - python3-docker        # Module Ansible pour Docker
+          - python3-docker
         state: present
         update_cache: yes
 
@@ -48,7 +41,7 @@
         state: present
 
     # =========================================
-    # 3. MONGODB VIA DOCKER (Contournement SHA1)
+    # 3. MONGODB VIA DOCKER
     # =========================================
     - name: Lancer MongoDB en conteneur
       docker_container:
@@ -56,8 +49,8 @@
         image: mongo:7.0
         networks:
           - name: graylog_network
-        ports: "27017:27017"  # Expose le port 27017 sur l'hôte
-        volumes: "/data/mongodb:/data/db"  # Persistance des données
+        ports: "27017:27017"
+        volumes: "/data/mongodb:/data/db"
         restart_policy: always
         env:
           MONGO_INITDB_ROOT_USERNAME: "admin"
@@ -70,7 +63,7 @@
         timeout: 60
 
     # =========================================
-    # 4. OPENSEARCH VIA DOCKER (Contournement SHA1)
+    # 4. OPENSEARCH VIA DOCKER
     # =========================================
     - name: Télécharger l'image OpenSearch
       docker_image:
@@ -89,18 +82,18 @@
         image: "opensearchproject/opensearch:{{ opensearch_version }}"
         networks:
           - name: graylog_network
-        ports: "9200:9200"  # Expose le port 9200 sur l'hôte
+        ports: "9200:9200"
         volumes: "opensearch_data:/usr/share/opensearch/data"
         restart_policy: always
         env:
           OPENSEARCH_JAVA_OPTS: "-Xms{{ opensearch_heap }} -Xmx{{ opensearch_heap }}"
           bootstrap.memory_lock: "true"
-          discovery.type: "single-node"      # Mode standalone
-          action.auto_create_index: "false"   # Désactive la création automatique d'index
-          plugins.security.disabled: "true"   # Désactive la sécurité (pour Graylog)
+          discovery.type: "single-node"
+          action.auto_create_index: "false"
+          plugins.security.disabled: "true"
         ulimits:
-          - "memlock:-1:-1"      # Verrouille la mémoire pour OpenSearch
-          - "nofile:65536:65536"  # Augmente la limite de fichiers ouverts
+          - "memlock:-1:-1"
+          - "nofile:65536:65536"
 
     - name: Attendre qu'OpenSearch soit prêt
       wait_for:
@@ -117,14 +110,12 @@
         state: present
         filename: graylog
         update_cache: yes
-      environment:
-        APT_KEY_DONT_WARN_ON_DANGEROUS_USAGE: "1"  # Désactive les avertissements
 
     - name: Installer Graylog
       apt:
         name: graylog-server
         state: present
-        allow_unauthenticated: yes  # Autorise l'installation sans clé GPG
+        allow_unauthenticated: yes
       ignore_errors: yes
 
     - name: Générer le hash SHA2 du mot de passe root
@@ -162,11 +153,10 @@
         port: "{{ item }}"
         proto: tcp
       loop:
-        - "5044"  # Port pour les inputs Beats (Filebeat)
+        - "5044"  # Port pour les inputs Beats
         - "9000"  # Port de l'UI Graylog
       ignore_errors: yes
 
----
 # =============================================================
 # PLAY 2 — Installation de Filebeat sur le web-server (Nginx)
 # Cible : 192.168.56.11
@@ -175,11 +165,10 @@
   hosts: webservers
   become: yes
   vars:
-    graylog_host: "192.168.56.12"  # Adresse du serveur Graylog
-    graylog_beats_port: 5044        # Port Beats de Graylog
+    graylog_host: "192.168.56.12"
+    graylog_beats_port: 5044
 
   tasks:
-    # ---Installer Filebeat---
     - name: Installer les dépendances pour Filebeat
       apt:
         name:
@@ -206,7 +195,6 @@
         state: present
         update_cache: yes
 
-    # ---Configurer Filebeat pour Nginx---
     - name: Configurer Filebeat pour envoyer les logs Nginx à Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
@@ -221,7 +209,6 @@
                 service: nginx
                 server: web-server
               fields_under_root: true
-
           output.logstash:
             hosts: ["{{ graylog_host }}:{{ graylog_beats_port }}"]
           logging.level: warning
@@ -232,7 +219,6 @@
         state: started
         enabled: yes
 
----
 # =============================================================
 # PLAY 3 — Installation de Filebeat sur le db-server (MariaDB)
 # Cible : 192.168.56.12
@@ -241,18 +227,16 @@
   hosts: dbservers
   become: yes
   vars:
-    graylog_host: "127.0.0.1"  # Adresse locale (Graylog est sur la même machine)
-    graylog_beats_port: 5044    # Port Beats de Graylog
+    graylog_host: "127.0.0.1"
+    graylog_beats_port: 5044
 
   tasks:
-    # ---Installer Filebeat---
     - name: Installer Filebeat
       apt:
         name: filebeat
         state: present
         update_cache: yes
 
-    # ---Configurer MariaDB pour les logs---
     - name: Activer les logs généraux MariaDB
       blockinfile:
         path: /etc/mysql/mariadb.conf.d/50-server.cnf
@@ -270,7 +254,6 @@
         group: adm
         mode: '0750'
 
-    # ---Configurer Filebeat pour MariaDB---
     - name: Configurer Filebeat pour envoyer les logs MariaDB à Graylog
       copy:
         dest: /etc/filebeat/filebeat.yml
@@ -285,7 +268,6 @@
                 service: mariadb
                 server: db-server
               fields_under_root: true
-
           output.logstash:
             hosts: ["{{ graylog_host }}:{{ graylog_beats_port }}"]
           logging.level: warning
@@ -296,7 +278,6 @@
         state: started
         enabled: yes
 
-  # ---Handler pour redémarrer MariaDB si nécessaire---
   handlers:
     - name: Restart MariaDB
       service:
