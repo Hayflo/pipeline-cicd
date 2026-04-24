@@ -1,0 +1,311 @@
+---
+# =============================================================
+# PLAY 1 — Installation de Graylog 5.x sur le db-server
+# Dépendances : MongoDB 6, OpenSearch 2, Graylog 5
+# Cible       : 192.168.56.12
+# =============================================================
+
+- name: Installation Graylog 5.x (db-server)
+  hosts: dbservers
+  become: yes
+
+  vars:
+    graylog_password_secret: "azerty"   # min 16 chars — à changer
+    graylog_root_password: "azerty"                               # mot de passe UI — à changer
+    graylog_http_bind: "0.0.0.0:9000"
+    opensearch_heap: "512m"
+
+  tasks:
+
+    # ── Prérequis système ──────────────────────────────────────
+
+    - name: Installer les dépendances système
+      apt:
+        name:
+          - apt-transport-https
+          - gnupg
+          - curl
+          - pwgen
+          - openjdk-17-jre-headless
+        state: present
+        update_cache: yes
+
+    # ── MongoDB 6 ──────────────────────────────────────────────
+
+    - name: Ajouter la clé GPG MongoDB
+      apt_key:
+        url: https://www.mongodb.org/static/pgp/server-6.0.asc
+        state: present
+
+    - name: Ajouter le dépôt MongoDB 6
+      apt_repository:
+        repo: "deb [ arch=amd64 ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/6.0 main"
+        state: present
+        filename: mongodb-org-6.0
+
+    - name: Installer MongoDB
+      apt:
+        name: mongodb-org
+        state: present
+        update_cache: yes
+
+    - name: Démarrer et activer MongoDB
+      service:
+        name: mongod
+        state: started
+        enabled: yes
+
+    # ── OpenSearch 2 ───────────────────────────────────────────
+
+    - name: Ajouter la clé GPG OpenSearch
+      apt_key:
+        url: https://artifacts.opensearch.org/publickeys/opensearch.pgp
+        state: present
+
+    - name: Ajouter le dépôt OpenSearch 2
+      apt_repository:
+        repo: "deb https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt stable main"
+        state: present
+        filename: opensearch-2
+
+    - name: Installer OpenSearch
+      apt:
+        name: opensearch
+        state: present
+        update_cache: yes
+      environment:
+        OPENSEARCH_INITIAL_ADMIN_PASSWORD: "Admin@OpenSearch1"
+
+    - name: Configurer OpenSearch pour Graylog
+      blockinfile:
+        path: /etc/opensearch/opensearch.yml
+        block: |
+          cluster.name: graylog
+          network.host: 127.0.0.1
+          discovery.type: single-node
+          action.auto_create_index: false
+          plugins.security.disabled: true
+        marker: "# {mark} ANSIBLE MANAGED — GRAYLOG CONFIG"
+
+    - name: Configurer la JVM OpenSearch (heap)
+      lineinfile:
+        path: /etc/opensearch/jvm.options
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^-Xms', line: '-Xms{{ opensearch_heap }}' }
+        - { regexp: '^-Xmx', line: '-Xmx{{ opensearch_heap }}' }
+
+    - name: Démarrer et activer OpenSearch
+      service:
+        name: opensearch
+        state: started
+        enabled: yes
+
+    - name: Attendre qu'OpenSearch soit prêt (port 9200)
+      wait_for:
+        host: 127.0.0.1
+        port: 9200
+        timeout: 60
+
+    # ── Graylog 5 ──────────────────────────────────────────────
+
+    - name: Ajouter la clé GPG Graylog
+      apt_key:
+        url: https://downloads.graylog.org/repo/packages/debian/pubkey.gpg
+        state: present
+
+    - name: Ajouter le dépôt Graylog 5
+      apt_repository:
+        repo: "deb https://downloads.graylog.org/repo/packages/debian stable 5.2"
+        state: present
+        filename: graylog
+
+    - name: Installer Graylog
+      apt:
+        name: graylog-server
+        state: present
+        update_cache: yes
+
+    - name: Générer le hash SHA2 du mot de passe root
+      command: "echo -n {{ graylog_root_password }} | sha256sum | awk '{print $1}'"
+      register: graylog_root_password_sha2
+      changed_when: false
+
+    - name: Configurer Graylog (server.conf)
+      lineinfile:
+        path: /etc/graylog/server/server.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^password_secret', line: 'password_secret = {{ graylog_password_secret }}' }
+        - { regexp: '^root_password_sha2', line: 'root_password_sha2 = {{ graylog_root_password_sha2.stdout }}' }
+        - { regexp: '^http_bind_address', line: 'http_bind_address = {{ graylog_http_bind }}' }
+        - { regexp: '^elasticsearch_hosts', line: 'elasticsearch_hosts = http://127.0.0.1:9200' }
+
+    - name: Démarrer et activer Graylog
+      service:
+        name: graylog-server
+        state: started
+        enabled: yes
+
+    - name: Attendre que Graylog soit prêt (port 9000)
+      wait_for:
+        host: 0.0.0.0
+        port: 9000
+        timeout: 90
+
+    - name: Ouvrir le port 5044 (Filebeat GELF/Beats input)
+      ufw:
+        rule: allow
+        port: "5044"
+        proto: tcp
+      ignore_errors: yes
+
+    - name: Ouvrir le port 9000 (UI Graylog)
+      ufw:
+        rule: allow
+        port: "9000"
+        proto: tcp
+      ignore_errors: yes
+
+# =============================================================
+# PLAY 2 — Installation de Filebeat sur le web-server
+# Envoi des logs Nginx vers Graylog (db-server:5044)
+# Cible : 192.168.56.11
+# =============================================================
+
+- name: Installation Filebeat sur le web-server (Nginx)
+  hosts: webservers
+  become: yes
+
+  vars:
+    graylog_host: "192.168.56.12"
+    graylog_beats_port: 5044
+
+  tasks:
+
+    - name: Ajouter la clé GPG Elastic
+      apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+
+    - name: Ajouter le dépôt Filebeat
+      apt_repository:
+        repo: "deb https://artifacts.elastic.co/packages/8.x/apt stable main"
+        state: present
+        filename: elastic-8
+
+    - name: Installer Filebeat
+      apt:
+        name: filebeat
+        state: present
+        update_cache: yes
+
+    - name: Configurer Filebeat pour Nginx → Graylog
+      copy:
+        dest: /etc/filebeat/filebeat.yml
+        content: |
+          filebeat.inputs:
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/nginx/access.log
+                - /var/log/nginx/error.log
+              fields:
+                service: nginx
+                server: web-server
+              fields_under_root: true
+
+          output.logstash:
+            hosts: ["{{ graylog_host }}:{{ graylog_beats_port }}"]
+
+          logging.level: warning
+
+    - name: Démarrer et activer Filebeat
+      service:
+        name: filebeat
+        state: started
+        enabled: yes
+
+# =============================================================
+# PLAY 3 — Installation de Filebeat sur le db-server
+# Envoi des logs MariaDB vers Graylog (localhost:5044)
+# Cible : 192.168.56.12
+# =============================================================
+
+- name: Installation Filebeat sur le db-server (MariaDB)
+  hosts: dbservers
+  become: yes
+
+  vars:
+    graylog_host: "127.0.0.1"
+    graylog_beats_port: 5044
+
+  tasks:
+
+    - name: Ajouter la clé GPG Elastic
+      apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+
+    - name: Ajouter le dépôt Filebeat
+      apt_repository:
+        repo: "deb https://artifacts.elastic.co/packages/8.x/apt stable main"
+        state: present
+        filename: elastic-8
+
+    - name: Installer Filebeat
+      apt:
+        name: filebeat
+        state: present
+        update_cache: yes
+
+    - name: Activer les logs généraux MariaDB
+      blockinfile:
+        path: /etc/mysql/mariadb.conf.d/50-server.cnf
+        block: |
+          general_log = 1
+          general_log_file = /var/log/mysql/mysql.log
+        marker: "# {mark} ANSIBLE MANAGED — GENERAL LOG"
+      notify: Restart MariaDB
+
+    - name: S'assurer que le dossier /var/log/mysql existe
+      file:
+        path: /var/log/mysql
+        state: directory
+        owner: mysql
+        group: adm
+        mode: '0750'
+
+    - name: Configurer Filebeat pour MariaDB → Graylog
+      copy:
+        dest: /etc/filebeat/filebeat.yml
+        content: |
+          filebeat.inputs:
+            - type: log
+              enabled: true
+              paths:
+                - /var/log/mysql/mysql.log
+                - /var/log/mysql/error.log
+              fields:
+                service: mariadb
+                server: db-server
+              fields_under_root: true
+
+          output.logstash:
+            hosts: ["{{ graylog_host }}:{{ graylog_beats_port }}"]
+
+          logging.level: warning
+
+    - name: Démarrer et activer Filebeat
+      service:
+        name: filebeat
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart MariaDB
+      service:
+        name: mariadb
+        state: restarted
