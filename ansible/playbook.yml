@@ -27,9 +27,8 @@
     - name: Déployer une page web simple
       copy:
         dest: /var/www/html/index.html
-        content: "<h1>Deploiement reussi</h1>"
+        content: "<h1>Déploiement réussi</h1>"
 
----
 - name: Déploiement base de données
   hosts: dbservers
   become: yes
