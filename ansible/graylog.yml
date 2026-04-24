@@ -194,6 +194,9 @@
     - name: Installer le dépôt Graylog via le .deb
       apt:
         deb: /tmp/graylog-repo.deb
+
+    - name: Rafraîchir le cache APT après ajout du dépôt Graylog
+      apt:
         update_cache: yes
 
     - name: Installer Graylog
