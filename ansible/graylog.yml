@@ -1,8 +1,8 @@
 ---
 # =============================================================
 # PLAY 1 — Installation de Graylog 5.x sur le db-server
-# Dépendances : MongoDB 6, OpenSearch 2, Graylog 5
-# Cible       : 192.168.56.12
+# Compatible Debian 12 Bookworm / 13 Trixie (sans apt-key)
+# Cible : 192.168.56.12
 # =============================================================
 
 - name: Installation Graylog 5.x (db-server)
@@ -10,14 +10,20 @@
   become: yes
 
   vars:
-    graylog_password_secret: "azerty"   # min 16 chars — à changer
-    graylog_root_password: "azerty"                               # mot de passe UI — à changer
+    graylog_password_secret: "supersecretpasswordmin16chars!!"   # min 16 chars — à changer
+    graylog_root_password: "admin"                               # mot de passe UI — à changer
     graylog_http_bind: "0.0.0.0:9000"
     opensearch_heap: "512m"
 
   tasks:
 
     # ── Prérequis système ──────────────────────────────────────
+
+    - name: Créer le dossier /etc/apt/keyrings
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
     - name: Installer les dépendances système
       apt:
@@ -32,14 +38,15 @@
 
     # ── MongoDB 6 ──────────────────────────────────────────────
 
-    - name: Ajouter la clé GPG MongoDB
-      apt_key:
+    - name: Télécharger la clé GPG MongoDB
+      get_url:
         url: https://www.mongodb.org/static/pgp/server-6.0.asc
-        state: present
+        dest: /etc/apt/keyrings/mongodb-org-6.0.asc
+        mode: '0644'
 
     - name: Ajouter le dépôt MongoDB 6
       apt_repository:
-        repo: "deb [ arch=amd64 ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/6.0 main"
+        repo: "deb [ arch=amd64 signed-by=/etc/apt/keyrings/mongodb-org-6.0.asc ] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/6.0 main"
         state: present
         filename: mongodb-org-6.0
 
@@ -57,14 +64,15 @@
 
     # ── OpenSearch 2 ───────────────────────────────────────────
 
-    - name: Ajouter la clé GPG OpenSearch
-      apt_key:
+    - name: Télécharger la clé GPG OpenSearch
+      get_url:
         url: https://artifacts.opensearch.org/publickeys/opensearch.pgp
-        state: present
+        dest: /etc/apt/keyrings/opensearch.pgp
+        mode: '0644'
 
     - name: Ajouter le dépôt OpenSearch 2
       apt_repository:
-        repo: "deb https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt stable main"
+        repo: "deb [ signed-by=/etc/apt/keyrings/opensearch.pgp ] https://artifacts.opensearch.org/releases/bundle/opensearch/2.x/apt stable main"
         state: present
         filename: opensearch-2
 
@@ -110,14 +118,15 @@
 
     # ── Graylog 5 ──────────────────────────────────────────────
 
-    - name: Ajouter la clé GPG Graylog
-      apt_key:
+    - name: Télécharger la clé GPG Graylog
+      get_url:
         url: https://downloads.graylog.org/repo/packages/debian/pubkey.gpg
-        state: present
+        dest: /etc/apt/keyrings/graylog.gpg
+        mode: '0644'
 
     - name: Ajouter le dépôt Graylog 5
       apt_repository:
-        repo: "deb https://downloads.graylog.org/repo/packages/debian stable 5.2"
+        repo: "deb [ signed-by=/etc/apt/keyrings/graylog.gpg ] https://downloads.graylog.org/repo/packages/debian stable 5.2"
         state: present
         filename: graylog
 
@@ -155,7 +164,7 @@
         port: 9000
         timeout: 90
 
-    - name: Ouvrir le port 5044 (Filebeat GELF/Beats input)
+    - name: Ouvrir le port 5044 (Beats input)
       ufw:
         rule: allow
         port: "5044"
@@ -170,8 +179,7 @@
       ignore_errors: yes
 
 # =============================================================
-# PLAY 2 — Installation de Filebeat sur le web-server
-# Envoi des logs Nginx vers Graylog (db-server:5044)
+# PLAY 2 — Installation de Filebeat sur le web-server (Nginx)
 # Cible : 192.168.56.11
 # =============================================================
 
@@ -185,18 +193,25 @@
 
   tasks:
 
-    - name: Ajouter la clé GPG Elastic
-      apt_key:
-        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-        state: present
+    - name: Créer le dossier /etc/apt/keyrings (web-server)
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
 
-    - name: Ajouter le dépôt Filebeat
+    - name: Télécharger la clé GPG Elastic (web-server)
+      get_url:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        dest: /etc/apt/keyrings/elastic.asc
+        mode: '0644'
+
+    - name: Ajouter le dépôt Filebeat (web-server)
       apt_repository:
-        repo: "deb https://artifacts.elastic.co/packages/8.x/apt stable main"
+        repo: "deb [ signed-by=/etc/apt/keyrings/elastic.asc ] https://artifacts.elastic.co/packages/8.x/apt stable main"
         state: present
         filename: elastic-8
 
-    - name: Installer Filebeat
+    - name: Installer Filebeat (web-server)
       apt:
         name: filebeat
         state: present
@@ -222,15 +237,14 @@
 
           logging.level: warning
 
-    - name: Démarrer et activer Filebeat
+    - name: Démarrer et activer Filebeat (web-server)
       service:
         name: filebeat
         state: started
         enabled: yes
 
 # =============================================================
-# PLAY 3 — Installation de Filebeat sur le db-server
-# Envoi des logs MariaDB vers Graylog (localhost:5044)
+# PLAY 3 — Installation de Filebeat sur le db-server (MariaDB)
 # Cible : 192.168.56.12
 # =============================================================
 
@@ -244,18 +258,19 @@
 
   tasks:
 
-    - name: Ajouter la clé GPG Elastic
-      apt_key:
+    - name: Télécharger la clé GPG Elastic (db-server)
+      get_url:
         url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
-        state: present
+        dest: /etc/apt/keyrings/elastic.asc
+        mode: '0644'
 
-    - name: Ajouter le dépôt Filebeat
+    - name: Ajouter le dépôt Filebeat (db-server)
       apt_repository:
-        repo: "deb https://artifacts.elastic.co/packages/8.x/apt stable main"
+        repo: "deb [ signed-by=/etc/apt/keyrings/elastic.asc ] https://artifacts.elastic.co/packages/8.x/apt stable main"
         state: present
         filename: elastic-8
 
-    - name: Installer Filebeat
+    - name: Installer Filebeat (db-server)
       apt:
         name: filebeat
         state: present
@@ -298,7 +313,7 @@
 
           logging.level: warning
 
-    - name: Démarrer et activer Filebeat
+    - name: Démarrer et activer Filebeat (db-server)
       service:
         name: filebeat
         state: started
