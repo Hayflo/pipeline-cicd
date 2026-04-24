@@ -1,6 +1,5 @@
 # =============================================================
 # PLAY 1 — Rollback serveur web
-# Cible : 192.168.56.11
 # =============================================================
 - name: Rollback serveur web
   hosts: webservers
@@ -35,7 +34,6 @@
 
 # =============================================================
 # PLAY 2 — Rollback base de données
-# Cible : 192.168.56.12
 # =============================================================
 - name: Rollback base de données
   hosts: dbservers
@@ -52,30 +50,18 @@
         state: started
         enabled: yes
 
-    # ── Rollback Docker (MongoDB + OpenSearch) ─────────────────────────────
-    - name: Vérifier si MongoDB existe
-      command: docker inspect mongodb
-      register: mongodb_container
-      ignore_errors: yes
-      changed_when: false
-
-    - name: Arrêter/supprimer MongoDB
+    # --- Rollback Docker (MongoDB + OpenSearch) ---
+    - name: Arrêter et supprimer MongoDB
       docker_container:
         name: mongodb
         state: absent
-      when: mongodb_container.rc == 0
-
-    - name: Vérifier si OpenSearch existe
-      command: docker inspect opensearch
-      register: opensearch_container
       ignore_errors: yes
-      changed_when: false
 
-    - name: Arrêter/supprimer OpenSearch
+    - name: Arrêter et supprimer OpenSearch
       docker_container:
         name: opensearch
         state: absent
-      when: opensearch_container.rc == 0
+      ignore_errors: yes
 
     - name: Supprimer le réseau Docker
       docker_network:
@@ -89,10 +75,9 @@
         state: absent
       loop:
         - opensearch_data
-        - mongodb_data  # Si vous l'aviez créé
       ignore_errors: yes
 
-    # ── Rollback Graylog/Filebeat ──────────────────────────────────────────
+    # --- Rollback Graylog/Filebeat ---
     - name: Vérifier si Graylog est installé
       stat:
         path: /usr/share/graylog-server/bin/graylog
@@ -114,12 +99,3 @@
         name: filebeat
         state: restarted
       when: filebeat_db_bin.stat.exists
-
-    - name: Résumé du rollback
-      debug:
-        msg: |
-          Rollback terminé :
-          - MariaDB : actif
-          - Conteneurs supprimés : MongoDB ({{ mongodb_container.rc == 0 }}), OpenSearch ({{ opensearch_container.rc == 0 }})
-          - Graylog installé : {{ graylog_bin.stat.exists }}
-          - Filebeat installé : {{ filebeat_db_bin.stat.exists }}
